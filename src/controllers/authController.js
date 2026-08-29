@@ -1,14 +1,13 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { getDB } = require('../config/db');
 const { ObjectId } = require('mongodb');
+const { getDB } = require('../config/db');
 const { ok, created, conflict, unauthorized, notFound, serverError, fail } = require('../utils/response');
 
 const TOKEN_EXPIRY = '7d';
 const SALT_ROUNDS = 10;
 
-const RESERVED_FIELDS = ['role', '_id', 'createdAt', 'updatedAt', 'isActive', 'permissions'];
-
+// Register New User (Customer)
 const registerUser = async (req, res) => {
   try {
     const db = await getDB();
@@ -18,7 +17,9 @@ const registerUser = async (req, res) => {
       return fail(res, 'Name, email and password are required.');
     }
 
-    const existingUser = await db.collection('users').findOne({ email });
+    const cleanEmail = String(email).trim().toLowerCase();
+
+    const existingUser = await db.collection('users').findOne({ email: cleanEmail });
     if (existingUser) {
       return conflict(res, 'User already exists with this email.');
     }
@@ -26,7 +27,7 @@ const registerUser = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
     const newUser = {
       name: String(name).trim(),
-      email: String(email).trim().toLowerCase(),
+      email: cleanEmail,
       password: hashedPassword,
       role: 'customer',
       isActive: true,
@@ -41,6 +42,7 @@ const registerUser = async (req, res) => {
   }
 };
 
+// Login User / Admin
 const loginUser = async (req, res) => {
   try {
     const db = await getDB();
@@ -50,7 +52,9 @@ const loginUser = async (req, res) => {
       return fail(res, 'Email and password are required.');
     }
 
-    const user = await db.collection('users').findOne({ email });
+    const cleanEmail = String(email).trim().toLowerCase();
+
+    const user = await db.collection('users').findOne({ email: cleanEmail });
     if (!user) {
       return unauthorized(res, 'Invalid email or password.');
     }
@@ -86,6 +90,7 @@ const loginUser = async (req, res) => {
   }
 };
 
+// Get All Customers List (Admin Only Route)
 const getCustomers = async (req, res) => {
   try {
     const db = await getDB();
@@ -118,14 +123,17 @@ const getCustomers = async (req, res) => {
   }
 };
 
+// Get Logged-in User Profile
 const getMe = async (req, res) => {
   try {
     const db = await getDB();
     if (!req.user || !req.user.userId) return unauthorized(res, 'Not authenticated.');
+
     const user = await db.collection('users').findOne(
       { _id: new ObjectId(req.user.userId) },
       { projection: { password: 0 } }
     );
+
     if (!user) return notFound(res, 'User not found.');
     return ok(res, user);
   } catch (error) {
@@ -133,4 +141,55 @@ const getMe = async (req, res) => {
   }
 };
 
-module.exports = { registerUser, loginUser, getCustomers, getMe };
+// Update Profile & Password
+const updateMe = async (req, res) => {
+  try {
+    const db = await getDB();
+    if (!req.user || !req.user.userId) return unauthorized(res, 'Not authenticated.');
+
+    const payload = req.body || {};
+    const $set = { updatedAt: new Date() };
+
+    if (payload.name !== undefined) {
+      const name = String(payload.name).trim();
+      if (!name) return fail(res, 'Name cannot be empty.');
+      $set.name = name;
+    }
+
+    if (payload.currentPassword && (payload.newPassword || payload.confirmNewPassword)) {
+      const cur = await db.collection('users').findOne(
+        { _id: new ObjectId(req.user.userId) },
+        { projection: { password: 1 } }
+      );
+      if (!cur) return notFound(res, 'User not found.');
+
+      const isCurrentPasswordValid = await bcrypt.compare(payload.currentPassword, cur.password);
+      if (!isCurrentPasswordValid) return fail(res, 'Current password is incorrect.');
+
+      const np = payload.newPassword;
+      const cp = payload.confirmNewPassword;
+      if (!np || np.length < 8) return fail(res, 'New password must be at least 8 characters.');
+      if (np !== cp) return fail(res, 'New passwords do not match.');
+
+      $set.password = await bcrypt.hash(np, SALT_ROUNDS);
+    }
+
+    const result = await db.collection('users').updateOne(
+      { _id: new ObjectId(req.user.userId) },
+      { $set }
+    );
+
+    if (result.matchedCount === 0) return notFound(res, 'User not found.');
+
+    const updated = await db.collection('users').findOne(
+      { _id: new ObjectId(req.user.userId) },
+      { projection: { password: 0 } }
+    );
+
+    return ok(res, updated, 'Profile updated successfully.');
+  } catch (error) {
+    return serverError(res, error);
+  }
+};
+
+module.exports = { registerUser, loginUser, getCustomers, getMe, updateMe };

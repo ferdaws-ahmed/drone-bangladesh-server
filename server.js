@@ -55,6 +55,15 @@ app.use('/api/products', require('./src/routes/productRoutes'));
 app.use('/api/orders', require('./src/routes/orderRoutes'));
 app.use('/api/maintenance', require('./src/routes/maintenanceRoutes'));
 
+app.use('/api/v1/admin/auth', require('./src/routes/authRoutes'));
+app.use('/api/v1/admin/orders', require('./src/routes/orderRoutes'));
+app.use('/api/v1/admin/me', require('./src/routes/authRoutes'));
+
+app.use('/api/v1/admin/products', require('./src/routes/admin/products'));
+app.use('/api/v1/admin/cms', require('./src/routes/admin/cms'));
+app.use('/api/v1/admin/settings', require('./src/routes/admin/settings'));
+app.use('/api/v1/admin/packages', require('./src/routes/admin/packages'));
+
 app.use((req, res) => {
   res.status(404).json({
     success: false,
