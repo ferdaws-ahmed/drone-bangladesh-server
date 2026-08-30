@@ -1,150 +1,68 @@
-const { ObjectId } = require('mongodb');
-const { getDB } = require('../../config/db');
-const { ok, created, notFound, fail, serverError } = require('../../utils/response');
+// server/src/controllers/admin/productController.js
+import { uploadToCloudinary } from '../../utils/cloudinary.js';
 
-const listAdminProducts = async (req, res) => {
+export const createDroneProduct = async (req, res) => {
   try {
-    const db = await getDB();
+    const { category, categoryImage, basic, specs, faqs } = req.body;
+
+    if (!category || !basic?.title || !basic?.productCode || !basic?.regularPrice) {
+      return fail(res, 'Required fields (Title, SKU, Category, Price) are missing', 400);
+    }
+
+    // 🟢 ১. ইমেজগুলো Cloudinary-তে আপলোড করে CDN URL তৈরি করা
+    let uploadedImages = [];
+    if (basic.images && Array.isArray(basic.images)) {
+      uploadedImages = await Promise.all(
+        basic.images.map(img => uploadToCloudinary(img, 'drones/gallery'))
+      );
+    }
+
+    let uploadedDescImg = null;
+    if (basic.descriptionImage) {
+      uploadedDescImg = await uploadToCloudinary(basic.descriptionImage, 'drones/descriptions');
+    }
+
+    let uploadedCatImg = null;
+    if (categoryImage) {
+      uploadedCatImg = await uploadToCloudinary(categoryImage, 'drones/categories');
+    }
+
+    const db = getDb();
     const collection = db.collection('products');
-    const page = Math.max(1, Number(req.query.page) || 1);
-    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
-    const skip = (page - 1) * limit;
 
-    const filter = {};
-    if (req.query.category) filter.category = req.query.category;
-    if (req.query.subCategory) filter.subCategory = req.query.subCategory;
-    if (req.query.isLive !== undefined) filter.isLive = req.query.isLive === 'true';
+    const existingProduct = await collection.findOne({ productCode: basic.productCode.trim() });
+    if (existingProduct) {
+      return fail(res, 'Product SKU / Code already exists in database', 400);
+    }
 
-    const [items, total] = await Promise.all([
-      collection.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).toArray(),
-      collection.countDocuments(filter),
-    ]);
-
-    return ok(res, {
-      items,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
+    // 🟢 ২. ডাটাবেসে Base64-এর বদলে কেবল Clean URL সেভ হবে
+    const newProduct = {
+      title: basic.title.trim(),
+      productCode: basic.productCode.trim(),
+      brand: basic.brand?.trim() || '',
+      category,
+      categoryImage: uploadedCatImg, // Cloudinary URL
+      stockStatus: basic.stockStatus || 'In Stock',
+      warranty: basic.warranty || '',
+      pricing: {
+        regularPrice: Number(basic.regularPrice) || 0,
+        discountPercent: Number(basic.discountPercent) || 0,
+        offerPrice: Number(basic.offerPrice) || 0,
+        savingsAmount: Number(basic.savingsAmount) || 0,
       },
-    }, 'Products fetched successfully.');
-  } catch (error) {
-    return serverError(res, error);
-  }
-};
-
-const getAdminProductById = async (req, res) => {
-  try {
-    const db = await getDB();
-    const { id } = req.params;
-
-    if (!ObjectId.isValid(id)) {
-      return fail(res, 'Invalid product ID format.');
-    }
-
-    const product = await db.collection('products').findOne({ _id: new ObjectId(id) });
-    if (!product) {
-      return notFound(res, 'Product not found.');
-    }
-
-    return ok(res, product, 'Product fetched successfully.');
-  } catch (error) {
-    return serverError(res, error);
-  }
-};
-
-const createAdminProduct = async (req, res) => {
-  try {
-    const db = await getDB();
-    const payload = req.body || {};
-
-    if (!payload.name || !payload.category) {
-      return fail(res, 'Product name and category are required.');
-    }
-
-    const doc = {
-      ...payload,
-      price: Number(payload.price) || 0,
-      stock: Number(payload.stock) || 0,
-      specifications: payload.specifications || {},
-      accessories: Array.isArray(payload.accessories) ? payload.accessories : [],
-      similarProducts: Array.isArray(payload.similarProducts) ? payload.similarProducts : [],
-      isFeatured: Boolean(payload.isFeatured),
-      badge: ['new-arrival', 'best-seller', 'hot', 'none'].includes(payload.badge) ? payload.badge : 'none',
-      isLive: payload.isLive !== false,
+      images: uploadedImages, // Cloudinary URLs Array
+      descriptionImage: uploadedDescImg, // Cloudinary URL
+      description: basic.description || '',
+      techSpecs: specs || {},
+      faqs: faqs || [],
       createdAt: new Date(),
       updatedAt: new Date(),
     };
 
-    const result = await db.collection('products').insertOne(doc);
-    return created(res, { insertedId: result.insertedId, product: doc }, 'Product created successfully.');
-  } catch (error) {
-    return serverError(res, error);
+    const result = await collection.insertOne(newProduct);
+    return ok(res, { _id: result.insertedId, ...newProduct }, 'Drone product created successfully');
+  } catch (err) {
+    console.error('Error in createDroneProduct:', err);
+    return errorResponse(res, 'Server Error: Failed to save product', 500);
   }
-};
-
-const updateAdminProduct = async (req, res) => {
-  try {
-    const db = await getDB();
-    const { id } = req.params;
-
-    if (!ObjectId.isValid(id)) {
-      return fail(res, 'Invalid product ID format.');
-    }
-
-    const $set = {
-      ...req.body,
-      updatedAt: new Date(),
-    };
-
-    if (req.body.price !== undefined) $set.price = Number(req.body.price) || 0;
-    if (req.body.stock !== undefined) $set.stock = Number(req.body.stock) || 0;
-    if (req.body.specifications) $set.specifications = req.body.specifications;
-    if (req.body.accessories) $set.accessories = Array.isArray(req.body.accessories) ? req.body.accessories : [];
-    if (req.body.similarProducts) $set.similarProducts = Array.isArray(req.body.similarProducts) ? req.body.similarProducts : [];
-    if (req.body.badge) {
-      $set.badge = ['new-arrival', 'best-seller', 'hot', 'none'].includes(req.body.badge) ? req.body.badge : 'none';
-    }
-    if (req.body.isLive !== undefined) $set.isLive = Boolean(req.body.isLive);
-    if (req.body.isFeatured !== undefined) $set.isFeatured = Boolean(req.body.isFeatured);
-
-    const result = await db.collection('products').updateOne({ _id: new ObjectId(id) }, { $set });
-    if (result.matchedCount === 0) {
-      return notFound(res, 'Product not found.');
-    }
-
-    const updated = await db.collection('products').findOne({ _id: new ObjectId(id) });
-    return ok(res, updated, 'Product updated successfully.');
-  } catch (error) {
-    return serverError(res, error);
-  }
-};
-
-const deleteAdminProduct = async (req, res) => {
-  try {
-    const db = await getDB();
-    const { id } = req.params;
-
-    if (!ObjectId.isValid(id)) {
-      return fail(res, 'Invalid product ID format.');
-    }
-
-    const result = await db.collection('products').deleteOne({ _id: new ObjectId(id) });
-    if (result.deletedCount === 0) {
-      return notFound(res, 'Product not found.');
-    }
-
-    return ok(res, { deletedId: id }, 'Product deleted successfully.');
-  } catch (error) {
-    return serverError(res, error);
-  }
-};
-
-module.exports = {
-  listAdminProducts,
-  getAdminProductById,
-  createAdminProduct,
-  updateAdminProduct,
-  deleteAdminProduct,
 };

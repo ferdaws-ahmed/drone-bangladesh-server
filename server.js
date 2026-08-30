@@ -64,6 +64,8 @@ app.use('/api/v1/admin/cms', require('./src/routes/admin/cms'));
 app.use('/api/v1/admin/settings', require('./src/routes/admin/settings'));
 app.use('/api/v1/admin/packages', require('./src/routes/admin/packages'));
 
+app.use('/api/v1/admin/categories', require('./src/routes/admin/categories'));
+
 app.use((req, res) => {
   res.status(404).json({
     success: false,
