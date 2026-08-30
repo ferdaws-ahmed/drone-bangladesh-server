@@ -1,10 +1,9 @@
-import express from 'express';
-import { createDroneProduct } from '../../controllers/admin/productController.js';
-import { verifyToken, verifyAdmin } from '../../middleware/authMiddleware.js';
-
+// server/src/routes/admin/products.js
+const express = require('express');
 const router = express.Router();
+const { createDroneProduct } = require('../../controllers/admin/productController');
+const { verifyToken, verifyAdmin } = require('../../middleware/authMiddleware');
 
-// Base Path: /api/v1/admin/products
 router.post('/', verifyToken, verifyAdmin, createDroneProduct);
 
-export default router;
+module.exports = router;

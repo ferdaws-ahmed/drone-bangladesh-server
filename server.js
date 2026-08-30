@@ -1,8 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
-const { connectDB } = require('./src/config/db');
-const { serverError } = require('./src/utils/response');
+
+const { connectDB, getDB } = require('./src/config/db');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -41,6 +41,7 @@ app.use(
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// ১. হেলথ চেক রুট
 app.get('/api/health', (req, res) => {
   res.status(200).json({
     success: true,
@@ -48,6 +49,27 @@ app.get('/api/health', (req, res) => {
     env: NODE_ENV,
     timestamp: new Date().toISOString(),
   });
+});
+
+// ২. ডাটাবেস কানেকশন টেস্ট করার জন্য নতুন রুট (নতুন যোগ করা হয়েছে)
+app.get('/api/test-db', async (req, res) => {
+  try {
+    const db = await getDB(); // 🟢 এখানেও getDB() হবে
+    const collections = await db.listCollections().toArray();
+    return res.status(200).json({
+      success: true,
+      message: 'Database is connected successfully! 🎉',
+      databaseName: db.databaseName,
+      collections: collections.map((c) => c.name),
+    });
+  } catch (err) {
+    console.error('Database Test Failed:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Database connection failed! ❌',
+      error: err.message,
+    });
+  }
 });
 
 app.use('/api/auth', require('./src/routes/authRoutes'));
@@ -63,7 +85,6 @@ app.use('/api/v1/admin/products', require('./src/routes/admin/products'));
 app.use('/api/v1/admin/cms', require('./src/routes/admin/cms'));
 app.use('/api/v1/admin/settings', require('./src/routes/admin/settings'));
 app.use('/api/v1/admin/packages', require('./src/routes/admin/packages'));
-
 app.use('/api/v1/admin/categories', require('./src/routes/admin/categories'));
 
 app.use((req, res) => {
@@ -75,14 +96,24 @@ app.use((req, res) => {
 
 app.use((err, req, res, next) => {
   console.error('[Server Error]:', err);
-  return serverError(res, NODE_ENV !== 'production' ? err : null);
+  return res.status(500).json({
+    success: false,
+    message: NODE_ENV !== 'production' ? err.message : 'Internal Server Error',
+  });
 });
 
 const startServer = async () => {
-  await connectDB();
+  try {
+    await connectDB();
+    console.log('✅ MongoDB connection check passed during startup.');
+  } catch (err) {
+    console.error('❌ Failed to connect to MongoDB on startup:', err.message);
+  }
+
   return app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT} [${NODE_ENV}]`);
     console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
+    console.log(`📍 DB Test check: http://localhost:${PORT}/api/test-db`);
   });
 };
 

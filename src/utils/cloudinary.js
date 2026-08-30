@@ -1,7 +1,7 @@
 // server/src/utils/cloudinary.js
-import { v2 as cloudinary } from 'cloudinary';
+const { v2: cloudinary } = require('cloudinary');
 
-// আপনার Cloudinary ড্যাশবোর্ড থেকে পাওয়া Credentials দিয়ে পরিবেশ প্রস্তুত করুন
+// আপনার Cloudinary ড্যাশবোর্ড থেকে পাওয়া Credentials দিয়ে পরিবেশ প্রস্তুত করুন
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
@@ -11,7 +11,7 @@ cloudinary.config({
 /**
  * Base64 বা Image File-কে Cloudinary তে আপলোড করে অটোমেটিক ক্যোয়ারী ও সর্ট ফরম্যাটে কমানো URL ব্যাক করে
  */
-export const uploadToCloudinary = async (fileString, folderName = 'drones') => {
+const uploadToCloudinary = async (fileString, folderName = 'drones') => {
   if (!fileString) return null;
   
   // যদি অলরেডি HTTP URL হয়, তবে নতুন করে আপলোড না করে সরাসরি রিটার্ন করবে
@@ -30,4 +30,9 @@ export const uploadToCloudinary = async (fileString, folderName = 'drones') => {
     console.error('Cloudinary Upload Error:', error);
     throw new Error('Image Upload Failed');
   }
+};
+
+module.exports = {
+  cloudinary,
+  uploadToCloudinary,
 };

@@ -1,19 +1,22 @@
-// server/src/controllers/admin/productController.js
-import { uploadToCloudinary } from '../../utils/cloudinary.js';
+const { getDb } = require('../../config/db');
+const { uploadToCloudinary } = require('../../utils/cloudinary');
 
-export const createDroneProduct = async (req, res) => {
+const createDroneProduct = async (req, res) => {
   try {
     const { category, categoryImage, basic, specs, faqs } = req.body;
 
     if (!category || !basic?.title || !basic?.productCode || !basic?.regularPrice) {
-      return fail(res, 'Required fields (Title, SKU, Category, Price) are missing', 400);
+      return res.status(400).json({
+        success: false,
+        message: 'Required fields (Title, SKU, Category, Price) are missing',
+      });
     }
 
     // 🟢 ১. ইমেজগুলো Cloudinary-তে আপলোড করে CDN URL তৈরি করা
     let uploadedImages = [];
     if (basic.images && Array.isArray(basic.images)) {
       uploadedImages = await Promise.all(
-        basic.images.map(img => uploadToCloudinary(img, 'drones/gallery'))
+        basic.images.map((img) => uploadToCloudinary(img, 'drones/gallery'))
       );
     }
 
@@ -32,7 +35,10 @@ export const createDroneProduct = async (req, res) => {
 
     const existingProduct = await collection.findOne({ productCode: basic.productCode.trim() });
     if (existingProduct) {
-      return fail(res, 'Product SKU / Code already exists in database', 400);
+      return res.status(400).json({
+        success: false,
+        message: 'Product SKU / Code already exists in database',
+      });
     }
 
     // 🟢 ২. ডাটাবেসে Base64-এর বদলে কেবল Clean URL সেভ হবে
@@ -60,9 +66,20 @@ export const createDroneProduct = async (req, res) => {
     };
 
     const result = await collection.insertOne(newProduct);
-    return ok(res, { _id: result.insertedId, ...newProduct }, 'Drone product created successfully');
+    return res.status(200).json({
+      success: true,
+      data: { _id: result.insertedId, ...newProduct },
+      message: 'Drone product created successfully',
+    });
   } catch (err) {
     console.error('Error in createDroneProduct:', err);
-    return errorResponse(res, 'Server Error: Failed to save product', 500);
+    return res.status(500).json({
+      success: false,
+      message: 'Server Error: Failed to save product',
+    });
   }
+};
+
+module.exports = {
+  createDroneProduct,
 };
