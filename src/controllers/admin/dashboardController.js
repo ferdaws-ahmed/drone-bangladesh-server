@@ -5,12 +5,14 @@ const getDashboardStats = async (req, res) => {
   try {
     const db = await getDB();
     
+    // 🟢 রিয়েল-টাইম ডাটা দ্রুত পাওয়ার জন্য Optimized Parallel Queries
     const [totalOrders, totalProducts, totalCustomers, totalRevenue] = await Promise.all([
-      db.collection('orders').countDocuments(),
-      db.collection('products').countDocuments(),
+      db.collection('orders').estimatedDocumentCount(),
+      db.collection('products').estimatedDocumentCount(),
       db.collection('users').countDocuments({ role: 'user' }),
       db.collection('orders').aggregate([
         { $match: { status: 'completed' } },
+        { $project: { totalAmount: 1 } },
         { $group: { _id: null, total: { $sum: '$totalAmount' } } }
       ]).toArray()
     ]);
