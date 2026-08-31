@@ -57,8 +57,12 @@ const connectDB = async () => {
   return connectionPromise;
 };
 
-const getDB = async () => {
-  return connectDB();
+const getDB = () => {
+  if (!cachedDb) {
+    throw new Error('Database not connected. Call connectDB first.');
+  }
+  return cachedDb;
 };
 
 module.exports = { connectDB, getDB };
+

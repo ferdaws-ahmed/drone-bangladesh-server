@@ -1,5 +1,5 @@
 const { ObjectId } = require('mongodb');
-const getDB = require('../../config/db'); // আপনার প্রজেক্টের ডিবি কানেকশন অনুযায়ী পাথ মিলিয়ে নেবেন
+const { getDB } = require('../../config/db');
 
 /**
  * @desc    Get all drone categories for the mega menu
@@ -8,9 +8,8 @@ const getDB = require('../../config/db'); // আপনার প্রজেক�
  */
 const getDroneCategories = async (req, res) => {
   try {
-    const db = getDB();
+    const db = await getDB(); // 👈 এখানে await যুক্ত করা হয়েছে
     
-    // পারফরম্যান্সের জন্য শুধু দরকারি ফিল্ডগুলো প্রজেক্ট করা (name, image, type)
     const categories = await db.collection('categories')
       .find({ type: 'drone' })
       .project({ name: 1, image: 1 })
@@ -57,9 +56,8 @@ const getProductsBySubCategory = async (req, res) => {
     }
 
     const categoryName = slug.replace(/-/g, ' ');
-    const db = getDB();
+    const db = await getDB(); // 👈 এখানে await যুক্ত করা হয়েছে
 
-    // কেস-ইনসেন্সিটিভ কুয়েরি সাব-ক্যাটাগরির জন্য
     const products = await db.collection('drones')
       .find({
         subCategory: { $regex: new RegExp(`^${categoryName}$`, 'i') },
@@ -96,7 +94,7 @@ const getSingleProductDetails = async (req, res) => {
       });
     }
 
-    const db = getDB();
+    const db = await getDB(); // 👈 এখানে await যুক্ত করা হয়েছে
     const product = await db.collection('drones').findOne({
       _id: new ObjectId(id),
     });
