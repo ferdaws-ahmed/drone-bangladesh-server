@@ -2,7 +2,38 @@ const { getDB } = require('../../config/db');
 const { uploadToCloudinary } = require('../../utils/cloudinary');
 const { ObjectId } = require('mongodb');
 
-const createDroneProduct = async (req, res) => {
+const getHandheldsByCategory = async (req, res) => {
+  try {
+    const { category } = req.query;
+    
+    if (!category) {
+      return res.status(400).json({
+        success: false,
+        message: 'Category parameter is required',
+      });
+    }
+
+    const db = await getDB();
+    const products = await db.collection('handhelds')
+      .find({ category })
+      .project({ _id: 1, title: 1, productCode: 1, category: 1, images: 1 })
+      .toArray();
+    
+    return res.status(200).json({
+      success: true,
+      data: products,
+      message: 'Handhelds fetched successfully',
+    });
+  } catch (err) {
+    console.error('Error in getHandheldsByCategory:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Server Error: Failed to fetch handhelds',
+    });
+  }
+};
+
+const createHandheldProduct = async (req, res) => {
   try {
     const { category, subCategory, categoryImage, basic, specs, faqs, accessories, combos } = req.body;
 
@@ -22,26 +53,26 @@ const createDroneProduct = async (req, res) => {
       ? combos.map(id => new ObjectId(id)) 
       : [];
 
-    // 🟢 ১. ইমেজগুলো Cloudinary-তে আপলোড করে CDN URL তৈরি করা
+    // Upload images to Cloudinary
     let uploadedImages = [];
     if (basic.images && Array.isArray(basic.images)) {
       uploadedImages = await Promise.all(
-        basic.images.map((img) => uploadToCloudinary(img, 'drones/gallery'))
+        basic.images.map((img) => uploadToCloudinary(img, 'handhelds/gallery'))
       );
     }
 
     let uploadedDescImg = null;
     if (basic.descriptionImage) {
-      uploadedDescImg = await uploadToCloudinary(basic.descriptionImage, 'drones/descriptions');
+      uploadedDescImg = await uploadToCloudinary(basic.descriptionImage, 'handhelds/descriptions');
     }
 
     let uploadedCatImg = null;
     if (categoryImage) {
-      uploadedCatImg = await uploadToCloudinary(categoryImage, 'drones/categories');
+      uploadedCatImg = await uploadToCloudinary(categoryImage, 'handhelds/categories');
     }
 
     const db = await getDB();
-    const collection = db.collection('Drones');
+    const collection = db.collection('handhelds');
 
     const existingProduct = await collection.findOne({ productCode: basic.productCode.trim() });
     if (existingProduct) {
@@ -51,14 +82,13 @@ const createDroneProduct = async (req, res) => {
       });
     }
 
-    // ২. ডাটাবেসে Base64-এর বদলে কেবল Clean URL সেভ হবে
     const newProduct = {
       title: basic.title.trim(),
       productCode: basic.productCode.trim(),
       brand: basic.brand?.trim() || '',
       category,
       subCategory,
-      categoryImage: uploadedCatImg, // Cloudinary URL
+      categoryImage: uploadedCatImg,
       stockStatus: basic.stockStatus || 'In Stock',
       warranty: basic.warranty || '',
       pricing: {
@@ -68,8 +98,8 @@ const createDroneProduct = async (req, res) => {
         savingsAmount: Number(basic.savingsAmount) || 0,
         emiPercentage: Number(basic.emiPercentage) || 0,
       },
-      images: uploadedImages, // Cloudinary URLs Array
-      descriptionImage: uploadedDescImg, // Cloudinary URL
+      images: uploadedImages,
+      descriptionImage: uploadedDescImg,
       description: basic.description || '',
       keyFeatures: basic.keyFeatures || [],
       techSpecs: specs || {},
@@ -84,17 +114,18 @@ const createDroneProduct = async (req, res) => {
     return res.status(200).json({
       success: true,
       data: { _id: result.insertedId, ...newProduct },
-      message: 'Drone product created successfully',
+      message: 'Handheld product created successfully',
     });
   } catch (err) {
-    console.error('Error in createDroneProduct:', err);
+    console.error('Error in createHandheldProduct:', err);
     return res.status(500).json({
       success: false,
-      message: 'Server Error: Failed to save product',
+      message: 'Server Error: Failed to save handheld product',
     });
   }
 };
 
 module.exports = {
-  createDroneProduct,
+  getHandheldsByCategory,
+  createHandheldProduct,
 };
