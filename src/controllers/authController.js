@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const { ObjectId } = require('mongodb');
 const { getDB } = require('../config/db');
 const { ok, created, conflict, unauthorized, notFound, serverError, fail } = require('../utils/response');
+const { uploadToCloudinary } = require('../utils/cloudinary');
 
 const TOKEN_EXPIRY = '7d';
 const SALT_ROUNDS = 10;
@@ -156,6 +157,15 @@ const updateMe = async (req, res) => {
       $set.name = name;
     }
 
+    // Avatar upload — accepts base64 data URI or existing https URL
+    if (payload.avatar !== undefined) {
+      if (payload.avatar === null || payload.avatar === '') {
+        $set.avatar = null;
+      } else {
+        $set.avatar = await uploadToCloudinary(payload.avatar, 'drones/avatars');
+      }
+    }
+
     if (payload.currentPassword && (payload.newPassword || payload.confirmNewPassword)) {
       const cur = await db.collection('users').findOne(
         { _id: new ObjectId(req.user.userId) },
@@ -192,4 +202,51 @@ const updateMe = async (req, res) => {
   }
 };
 
-module.exports = { registerUser, loginUser, getCustomers, getMe, updateMe };
+// Permanently delete a customer account (admin only)
+const deleteCustomer = async (req, res) => {
+  try {
+    const db = await getDB();
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return fail(res, 'Invalid user ID.');
+
+    const user = await db.collection('users').findOne({ _id: new ObjectId(id) });
+    if (!user) return notFound(res, 'User not found.');
+    if (user.role === 'admin') return fail(res, 'Cannot delete an admin account.');
+
+    await db.collection('users').deleteOne({ _id: new ObjectId(id) });
+    return ok(res, { deletedId: id }, 'Customer deleted successfully.');
+  } catch (error) {
+    return serverError(res, error);
+  }
+};
+
+// Toggle isActive flag — freeze (false) or unfreeze (true)
+const toggleFreezeCustomer = async (req, res) => {
+  try {
+    const db = await getDB();
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return fail(res, 'Invalid user ID.');
+
+    const user = await db.collection('users').findOne(
+      { _id: new ObjectId(id) },
+      { projection: { isActive: 1, role: 1 } }
+    );
+    if (!user) return notFound(res, 'User not found.');
+    if (user.role === 'admin') return fail(res, 'Cannot freeze an admin account.');
+
+    const newActive = user.isActive === false ? true : false; // toggle
+    await db.collection('users').updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { isActive: newActive, updatedAt: new Date() } }
+    );
+    return ok(
+      res,
+      { _id: id, isActive: newActive },
+      `Customer ${newActive ? 'unfrozen' : 'frozen'} successfully.`
+    );
+  } catch (error) {
+    return serverError(res, error);
+  }
+};
+
+module.exports = { registerUser, loginUser, getCustomers, getMe, updateMe, deleteCustomer, toggleFreezeCustomer };

@@ -1,9 +1,11 @@
 const { ObjectId } = require('mongodb');
 const { getDB } = require('../config/db');
 const { ok, created, notFound, fail, serverError } = require('../utils/response');
+const { findValidCoupon, calculateDiscount } = require('./couponController');
 
 const DELIVERY_STATUSES = ['Processing', 'Shipped', 'Out For Delivery', 'Delivered', 'Cancelled'];
 const PAYMENT_STATUSES = ['Pending', 'Paid', 'Partial', 'Refunded'];
+const ORDER_STATUSES = ['Pending', 'Confirmed', 'Cancelled'];
 
 const generateOrderId = () => `#ORD-${Date.now().toString().slice(-5)}-${Math.floor(1000 + Math.random() * 9000)}`;
 
@@ -12,7 +14,7 @@ const createOrder = async (req, res) => {
     const db = await getDB();
     const {
       items, customerInfo, shippingAddress, subtotal, shipping, tax, discount, total,
-      paymentMethod, notes,
+      paymentMethod, paymentDetails, notes, couponCode,
     } = req.body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -25,18 +27,39 @@ const createOrder = async (req, res) => {
       return fail(res, 'Order total is required.');
     }
 
+    let appliedCoupon = null;
+    let verifiedDiscount = 0;
+    if (couponCode) {
+      const validation = await findValidCoupon(couponCode, subtotal);
+      if (validation.error) return fail(res, validation.error);
+      appliedCoupon = validation.coupon;
+      verifiedDiscount = calculateDiscount(appliedCoupon);
+    }
+
+    const verifiedSubtotal = Number(subtotal) || 0;
+    const verifiedShipping = Number(shipping) || 0;
+    const verifiedTax = Number(tax) || 0;
+    const verifiedTotal = Math.max(0, verifiedSubtotal + verifiedShipping + verifiedTax - verifiedDiscount);
+
     const order = {
       orderId: generateOrderId(),
       items: items.map((it) => ({
         productId: it.productId,
         name: it.name,
         sku: it.sku || null,
+        category: it.category || null,
+        productType: it.productType || null,
         image: it.image || null,
         price: Number(it.price) || 0,
+        regularPrice: Number(it.regularPrice) || 0,
+        paymentType: it.paymentType || 'cash',
         quantity: Number(it.quantity) || 1,
+        productSnapshot: it.productSnapshot || null,
       })),
       customerInfo: {
         name: customerInfo.name,
+        firstName: customerInfo.firstName || null,
+        lastName: customerInfo.lastName || null,
         email: customerInfo.email,
         phone: customerInfo.phone,
       },
@@ -46,13 +69,26 @@ const createOrder = async (req, res) => {
         subtotal: Number(subtotal) || Number(total),
         shipping: Number(shipping) || 0,
         tax: Number(tax) || 0,
-        discount: Number(discount) || 0,
-        total: Number(total),
+        discount: verifiedDiscount,
+        total: verifiedTotal,
       },
+      coupon: appliedCoupon ? {
+        code: appliedCoupon.code,
+        discountAmount: verifiedDiscount,
+        minOrderAmount: Number(appliedCoupon.minOrderAmount) || 0,
+      } : null,
       paymentMethod: paymentMethod || 'Cash on Delivery',
+      paymentDetails: paymentDetails ? {
+        method: paymentDetails.method || paymentMethod,
+        mobileNumber: paymentDetails.mobileNumber || null,
+        transactionId: paymentDetails.transactionId || null,
+      } : null,
       paymentStatus: PAYMENT_STATUSES.includes(req.body.paymentStatus) ? req.body.paymentStatus : 'Pending',
+      orderStatus: ORDER_STATUSES.includes(req.body.orderStatus) ? req.body.orderStatus : 'Pending',
       deliveryStatus: DELIVERY_STATUSES.includes(req.body.deliveryStatus) ? req.body.deliveryStatus : 'Processing',
       notes: notes || '',
+      checkoutType: req.body.checkoutType || 'cart',
+      source: req.body.source || 'client',
       userId: req.user ? req.user.userId : null,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -61,7 +97,7 @@ const createOrder = async (req, res) => {
     const result = await db.collection('orders').insertOne(order);
     return created(
       res,
-      { insertedId: result.insertedId, orderId: order.orderId },
+      { ...order, _id: result.insertedId },
       'Order placed successfully.'
     );
   } catch (error) {
@@ -76,6 +112,18 @@ const getAllOrders = async (req, res) => {
 
     if (req.query.deliveryStatus) filter.deliveryStatus = req.query.deliveryStatus;
     if (req.query.paymentStatus) filter.paymentStatus = req.query.paymentStatus;
+    if (req.query.orderStatus) filter.orderStatus = req.query.orderStatus;
+    if (req.query.createdAfter) {
+      const createdAfter = new Date(req.query.createdAfter);
+      if (!Number.isNaN(createdAfter.getTime())) {
+        filter.createdAt = { ...(filter.createdAt || {}), $gt: createdAfter };
+      }
+    }
+    if (req.query.dateFrom || req.query.dateTo) {
+      filter.createdAt = {};
+      if (req.query.dateFrom) filter.createdAt.$gte = new Date(`${req.query.dateFrom}T00:00:00.000Z`);
+      if (req.query.dateTo) filter.createdAt.$lte = new Date(`${req.query.dateTo}T23:59:59.999Z`);
+    }
     if (req.query.search) {
       const s = String(req.query.search).trim();
       filter.$or = [
@@ -130,6 +178,31 @@ const getMyOrders = async (req, res) => {
   }
 };
 
+const getMyOrderByOrderId = async (req, res) => {
+  try {
+    const db = await getDB();
+    if (!req.user || !req.user.userId) {
+      return fail(res, 'User not authenticated.');
+    }
+
+    const orderId = String(req.params.orderId || '').trim();
+    if (!orderId) return fail(res, 'Order ID is required.');
+
+    const order = await db.collection('orders').findOne({
+      orderId,
+      $or: [
+        { userId: req.user.userId },
+        { 'customerInfo.email': req.user.email },
+      ],
+    });
+
+    if (!order) return notFound(res, 'Order not found for this account.');
+    return ok(res, order);
+  } catch (error) {
+    return serverError(res, error);
+  }
+};
+
 const getOrderById = async (req, res) => {
   try {
     const db = await getDB();
@@ -145,15 +218,36 @@ const getOrderById = async (req, res) => {
   }
 };
 
+const deleteOrder = async (req, res) => {
+  try {
+    const db = await getDB();
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) return fail(res, 'Invalid order ID format.');
+
+    const result = await db.collection('orders').deleteOne({ _id: new ObjectId(id) });
+    if (result.deletedCount === 0) return notFound(res, 'Order not found.');
+    return ok(res, { _id: id }, 'Order deleted successfully.');
+  } catch (error) {
+    return serverError(res, error);
+  }
+};
+
 const updateOrderStatus = async (req, res) => {
   try {
     const db = await getDB();
     const { id } = req.params;
-    const { deliveryStatus, paymentStatus, trackingNumber, courier } = req.body;
+    const { deliveryStatus, paymentStatus, orderStatus, trackingNumber, courier } = req.body;
 
     if (!ObjectId.isValid(id)) return fail(res, 'Invalid order ID format.');
 
     const $set = { updatedAt: new Date() };
+    if (orderStatus) {
+      if (!ORDER_STATUSES.includes(orderStatus)) return fail(res, `Invalid orderStatus. Allowed: ${ORDER_STATUSES.join(', ')}`);
+      $set.orderStatus = orderStatus;
+      if (orderStatus === 'Confirmed') $set.confirmedAt = new Date();
+      if (orderStatus === 'Cancelled') $set.cancelledAt = new Date();
+    }
     if (deliveryStatus) {
       if (!DELIVERY_STATUSES.includes(deliveryStatus)) {
         return fail(res, `Invalid deliveryStatus. Allowed: ${DELIVERY_STATUSES.join(', ')}`);
@@ -237,7 +331,9 @@ module.exports = {
   createOrder,
   getAllOrders,
   getMyOrders,
+  getMyOrderByOrderId,
   getOrderById,
+  deleteOrder,
   updateOrderStatus,
   getDashboardStats,
 };

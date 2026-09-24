@@ -6,6 +6,7 @@ const getSettings = async (req, res) => {
     const db = await getDB();
     const settings = await db.collection('settings').findOne({ key: 'store' }) || {
       key: 'store',
+      storeName: '',
       contact: {
         phone: '',
         email: '',
@@ -27,6 +28,7 @@ const updateSettings = async (req, res) => {
 
     const doc = {
       key: 'store',
+      storeName: payload.storeName || '',
       contact: {
         phone: payload.contact?.phone || '',
         email: payload.contact?.email || '',
@@ -52,66 +54,38 @@ const updateSettings = async (req, res) => {
 const getAdminSummary = async (req, res) => {
   try {
     const db = await getDB();
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
     const [
-      productCount,
-      liveProductCount,
-      lowStockCount,
+      droneCount,
+      handheldCount,
       orderCount,
       pendingOrderCount,
       customerCount,
-      maintenanceCount,
       maintenancePending,
       bannerCount,
-      liveBanner,
-      packageCount,
-      orders30d,
     ] = await Promise.all([
-      db.collection('products').countDocuments(),
-      db.collection('products').countDocuments({ isLive: { $ne: false } }),
-      db.collection('products').countDocuments({ stock: { $lte: 5 } }),
+      db.collection('Drones').countDocuments(),
+      db.collection('handhelds').countDocuments(),
       db.collection('orders').countDocuments(),
       db.collection('orders').countDocuments({
         deliveryStatus: { $in: ['Processing', 'Shipped', 'Out For Delivery'] },
       }),
       db.collection('users').countDocuments({ role: 'customer' }),
-      db.collection('maintenance').countDocuments(),
       db.collection('maintenance').countDocuments({
         status: { $in: ['Pending', 'In Progress', 'Awaiting Parts'] },
       }),
-      db.collection('banners').countDocuments(),
-      db.collection('banners').findOne({ isLive: true }, { projection: { _id: 1, title: 1, imageUrl: 1 } }),
-      db.collection('maintenance_packages').countDocuments(),
-      db.collection('orders')
-        .aggregate([
-          { $match: { createdAt: { $gte: thirtyDaysAgo } } },
-          { $group: { _id: null, count: { $sum: 1 }, revenue: { $sum: '$pricing.total' } } },
-        ])
-        .toArray(),
+      db.collection('banners').countDocuments({ isActive: true }),
     ]);
 
-    const last30Days = (orders30d && orders30d[0]) || { count: 0, revenue: 0 };
+    const productCount = droneCount + handheldCount;
 
     return ok(res, {
-      counts: {
-        products: productCount,
-        liveProducts: liveProductCount,
-        lowStockProducts: lowStockCount,
-        orders: orderCount,
-        pendingOrders: pendingOrderCount,
-        customers: customerCount,
-        maintenanceTickets: maintenanceCount,
-        maintenancePending,
-        banners: bannerCount,
-        packages: packageCount,
-      },
-      last30Days: {
-        ordersCount: last30Days.count || 0,
-        revenue: last30Days.revenue || 0,
-      },
-      liveBanner,
-      generatedAt: new Date().toISOString(),
+      productCount,
+      orderCount,
+      pendingOrderCount,
+      customerCount,
+      maintenanceCount: maintenancePending,
+      bannerCount,
     }, 'Admin summary fetched successfully.');
   } catch (error) {
     return serverError(res, error);

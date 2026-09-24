@@ -2,3 +2,5 @@
 .env.example
 .vercel
 .env*
+.env.local
+.env.example

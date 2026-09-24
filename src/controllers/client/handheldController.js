@@ -1,6 +1,6 @@
 const { createCatalogController } = require('./catalogController');
 
 module.exports = createCatalogController({
-  collectionName: 'Drones',
-  categoryType: 'drone',
+  collectionName: 'handhelds',
+  categoryType: 'handheld',
 });

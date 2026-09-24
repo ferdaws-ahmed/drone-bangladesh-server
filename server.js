@@ -41,6 +41,21 @@ app.use(
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Retry the database connection for requests if startup happened during a temporary outage.
+app.use(async (req, res, next) => {
+  if (req.path === '/api/health' || req.path === '/api/test-db') return next();
+  try {
+    await connectDB();
+    return next();
+  } catch (err) {
+    console.error('Database unavailable:', err.message);
+    return res.status(503).json({
+      success: false,
+      message: 'Database temporarily unavailable. Please try again shortly.',
+    });
+  }
+});
+
 // ১. হেলথ চেক রুট
 app.get('/api/health', (req, res) => {
   res.status(200).json({
@@ -51,10 +66,10 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// ২. ডাটাবেস কানেকশন টেস্ট করার জন্য নতুন রুট (নতুন যোগ করা হয়েছে)
+
 app.get('/api/test-db', async (req, res) => {
   try {
-    const db = await getDB(); // 🟢 এখানেও getDB() হবে
+    const db = await getDB(); 
     const collections = await db.listCollections().toArray();
     return res.status(200).json({
       success: true,
@@ -75,14 +90,24 @@ app.get('/api/test-db', async (req, res) => {
 app.use('/api/auth', require('./src/routes/authRoutes'));
 app.use('/api/products', require('./src/routes/productRoutes'));
 app.use('/api/orders', require('./src/routes/orderRoutes'));
+app.use('/api/coupons', require('./src/routes/couponRoutes'));
 app.use('/api/maintenance', require('./src/routes/maintenanceRoutes'));
+app.use('/api/settings', require('./src/routes/settingsRoutes'));
+app.use('/api/contact', require('./src/routes/contactRoutes'));
 
 
+app.use('/api', require('./src/routes/cartWishlistRoutes'));
 
+app.use('/api/client/products', require('./src/routes/client/products'));
 app.use('/api/client/drones', require('./src/routes/client/droneRoutes'));
+app.use('/api/client/handhelds', require('./src/routes/client/handheldRoutes'));
+app.use('/api/client/articles', require('./src/routes/client/articleRoutes'));
+app.use('/api/client/banners', require('./src/routes/client/bannerRoutes'));
+app.use('/api/client/homepage', require('./src/routes/client/homepageRoutes'));
 
 app.use('/api/v1/admin/auth', require('./src/routes/authRoutes'));
 app.use('/api/v1/admin/orders', require('./src/routes/orderRoutes'));
+app.use('/api/v1/admin/courier', require('./src/routes/admin/courier'));
 app.use('/api/v1/admin/me', require('./src/routes/authRoutes'));
 
 app.use('/api/v1/admin/products', require('./src/routes/admin/products'));
@@ -90,7 +115,11 @@ app.use('/api/v1/admin/handhelds', require('./src/routes/admin/handhelds'));
 app.use('/api/v1/admin/cms', require('./src/routes/admin/cms'));
 app.use('/api/v1/admin/settings', require('./src/routes/admin/settings'));
 app.use('/api/v1/admin/packages', require('./src/routes/admin/packages'));
+app.use('/api/v1/admin/maintenance', require('./src/routes/admin/maintenance'));
 app.use('/api/v1/admin/categories', require('./src/routes/admin/categories'));
+app.use('/api/v1/admin/coupons', require('./src/routes/admin/coupons'));
+app.use('/api/v1/admin/contact', require('./src/routes/admin/contact'));
+app.use('/api/v1/admin/homepage', require('./src/routes/admin/homepage'));
 
 app.use((req, res) => {
   res.status(404).json({
